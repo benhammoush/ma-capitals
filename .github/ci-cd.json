@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "nodeVersion": "24",
+  "buildEnvironment": {
+    "dev": {
+      "VITE_API_URL": "https://unearned-matter-crib.ngrok-free.dev",
+      "VITE_WS_URL": "wss://unearned-matter-crib.ngrok-free.dev/ws"
+    },
+    "production": {
+      "VITE_API_URL": "https://unearned-matter-crib.ngrok-free.dev",
+      "VITE_WS_URL": "wss://unearned-matter-crib.ngrok-free.dev/ws"
+    }
+  },
+  "targets": {
+    "dev": { "name": "ma-capitals-dev" },
+    "production": { "name": "ma-capitals" }
+  }
+}

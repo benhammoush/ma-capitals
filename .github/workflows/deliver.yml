@@ -1,0 +1,76 @@
+name: Deliver verified static artifact
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  deploy:
+    name: Publish tested frontend bytes
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      CI_SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_ENVIRONMENT: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: node control/scripts/release/source.mjs
+      - name: Recheck dev evidence after production approval
+        if: inputs.environment == 'production'
+        run: node control/scripts/release/dev-evidence.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: build-${{ inputs.source_sha }}-${{ inputs.environment }}
+          path: candidate
+      - run: node control/scripts/release/artifact.mjs verify
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: control
+      - name: Deliver only through trusted-main code
+        run: node control/scripts/ci-deploy.mjs
+        env:
+          CI_CONTROL_ROOT: ${{ github.workspace }}/control
+          CI_CANDIDATE_ROOT: ${{ github.workspace }}/candidate
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_SUBDOMAIN: ${{ vars.CLOUDFLARE_SUBDOMAIN }}
+          TARGET_ORIGIN: ${{ vars.TARGET_ORIGIN }}
+          CLOUDFLARE_DELIVERY_REVIEW: ${{ vars.CLOUDFLARE_DELIVERY_REVIEW }}
+      - name: Retain delivery identity even after uncertain mutation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: delivery-record-${{ inputs.environment }}
+          path: candidate/delivery-record.json
+          if-no-files-found: ignore
+          retention-days: 90

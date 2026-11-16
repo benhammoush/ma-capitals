@@ -1,0 +1,25 @@
+name: Verify and deploy to dev
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    name: Dev checks
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/verify.yml
+    with:
+      source_sha: ${{ github.sha }}
+      environment: dev
+  deploy_dev:
+    name: Dev delivery
+    needs: verify
+    uses: ./.github/workflows/deliver.yml
+    with:
+      source_sha: ${{ github.sha }}
+      environment: dev
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

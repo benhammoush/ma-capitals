@@ -1,0 +1,42 @@
+name: Weekly vulnerability audit
+on:
+  schedule:
+    - cron: '41 7 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend_audit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Audit full and runtime trees without automatic fixes
+        run: |
+          failed=0
+          npm audit || failed=1
+          npm audit --omit=dev || failed=1
+          exit "$failed"
+  backend_audit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13.16'
+          architecture: x64
+      - run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements-dev-win-py313.lock'
+        working-directory: backend
+      - run: python -B -m scripts.check_quality --audit-only
+        working-directory: backend

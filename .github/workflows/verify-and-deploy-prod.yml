@@ -1,0 +1,28 @@
+name: Verify and deploy to prod
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full merged SHA with retained successful dev delivery and owner acceptance
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify_release:
+    name: Production checks
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    uses: ./.github/workflows/verify.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      environment: production
+  deploy_production:
+    name: Production delivery
+    needs: verify_release
+    uses: ./.github/workflows/deliver.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      environment: production
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

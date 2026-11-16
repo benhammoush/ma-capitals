@@ -1,0 +1,105 @@
+name: Verify
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  frontend:
+    name: Frontend, publication and contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CI_SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_ENVIRONMENT: ${{ inputs.environment }}
+      CF_SEND_TELEMETRY: 'false'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: node control/scripts/release/source.mjs
+      - name: Require successful same-source dev delivery for production
+        if: inputs.environment == 'production'
+        run: node control/scripts/release/dev-evidence.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13.16'
+          architecture: x64
+      - name: Inspect tracked files
+        run: python -B scripts/check_publication.py
+        working-directory: candidate
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: candidate
+        env:
+          npm_config_engine_strict: 'true'
+      - name: Bound browser dependency downloads
+        timeout-minutes: 2
+        run: sudo "$(command -v node)" control/scripts/release/browser-host.mjs
+      - run: npx --no-install playwright install --with-deps chromium firefox webkit
+        timeout-minutes: 10
+        working-directory: candidate
+      - run: node control/scripts/release/configure.mjs
+      - run: npm run ci:quality
+        working-directory: candidate
+      - run: npm run ci:browser
+        working-directory: candidate
+      - run: npm run ci:prepare
+        working-directory: candidate
+      - run: node control/scripts/release/artifact.mjs prepare
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: build-${{ inputs.source_sha }}-${{ inputs.environment }}
+          path: |
+            candidate/.cloudflare/output/v0/
+            candidate/ci-build.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain failed browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-diagnostics-${{ inputs.environment }}
+          path: candidate/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+  backend:
+    name: Windows backend source verification
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13.16'
+          architecture: x64
+      - name: Install only pinned verification dependencies
+        run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements-dev-win-py313.lock'
+        working-directory: candidate/backend
+      - name: Verify source without broker, host or deployment credentials
+        run: python -B -m scripts.check_quality
+        working-directory: candidate/backend
